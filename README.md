@@ -103,7 +103,19 @@ The `core/nodejsActionBase` folder contains the Node.js app server used to imple
 ./gradlew core:nodejs12Action:distDocker
 ```
 
-This will return the following runtime images with the following names: `nodejs6action`,  `action-nodejs-v8`, `action-nodejs-v10` and `action-nodejs-v12`.
+This will return the following runtime images with the following names: `nodejs6action-custom-port`,  `action-nodejs-v8-custom-port`, `action-nodejs-v10-custom-port` and `action-nodejs-v12-custom-port`.
+
+- To build Singularity images, you must build Docker image first, and then push it to a local registry for Singularity to find. Then Singularity build process can be started with provided .def file.
+```
+# Start a docker registry
+docker run -d -p 5000:5000 --restart=always --name registry registry:2
+
+# Push local docker container to it
+docker tag nodejs6Action-custom-port localhost:5000/nodejs6Action-custom-port
+docker push localhost:5000/nodejs6Action-custom-port
+
+sudo SINGULARITY_NOHTTPS=1 singularity build nodejs6action.simg nodejs6action-singularity.def
+```
 
 ### Testing
 

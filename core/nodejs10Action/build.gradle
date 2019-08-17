@@ -23,7 +23,7 @@ eclipse {
     }
 }
 
-ext.dockerImageName = 'action-nodejs-v10'
+ext.dockerImageName = 'action-nodejs-v10-custom-port'
 apply from: '../../gradle/docker.gradle'
 
 distDocker.dependsOn 'copyProxy'

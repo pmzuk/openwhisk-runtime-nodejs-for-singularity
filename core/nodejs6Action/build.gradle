@@ -23,6 +23,6 @@ eclipse {
     }
 }
 
-ext.dockerImageName = 'nodejs6action'
+ext.dockerImageName = 'nodejs6action-custom-port'
 apply from: '../../gradle/docker.gradle'
 distDocker.dependsOn ':core:nodejsActionBase:distDocker'
