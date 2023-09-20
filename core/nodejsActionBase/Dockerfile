@@ -15,17 +15,29 @@
 # limitations under the License.
 #
 
-FROM buildpack-deps:trusty-curl
-
-ENV DEBIAN_FRONTEND noninteractive
+FROM node:lts-bullseye
 
 # Initial update and some basics.
+#
 RUN apt-get update && apt-get install -y \
     imagemagick \
     graphicsmagick \
+    zip \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-ADD . /nodejsAction
-# COPY the package.json to root container, so we can install npm packages a level up from user's packages, so user's packages take precedence
-COPY ./package.json /
+# Add sources and copy the package.json to root container,
+# so npm packages from user functions take precedence.
+#
+ADD  . /nodejsAction/
+COPY package.json /
+
+# Customize runtime with additional packages.
+#
+RUN cd / && npm install --no-package-lock --production \
+    && npm cache clean --force
+
+EXPOSE 8080
+
+WORKDIR /nodejsAction
+CMD node --expose-gc app.js

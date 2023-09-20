@@ -17,10 +17,10 @@
 
 // __OW_ALLOW_CONCURRENT: see docs/concurrency.md
 var config = {
-        'port': process.env.APP_PORT,
-        'apiHost': process.env.__OW_API_HOST,
-        'allowConcurrent': process.env.__OW_ALLOW_CONCURRENT,
-        'requestBodyLimit': "48mb"
+    'port': process.env.APP_PORT,
+    'apiHost': process.env.__OW_API_HOST,
+    'allowConcurrent': process.env.__OW_ALLOW_CONCURRENT,
+    'requestBodyLimit': "48mb"
 };
 
 var bodyParser = require('body-parser');
@@ -41,7 +41,7 @@ var service = require('./src/service').getService(config);
  * setup a middleware layer to restrict the request body size
  * this middleware is called every time a request is sent to the server
  */
-app.use(bodyParser.json({ limit: config.requestBodyLimit }));
+app.use(express.json({ limit: config.requestBodyLimit }));
 
 // identify the target Serverless platform
 const platformFactory = require('./platform/platform.js');

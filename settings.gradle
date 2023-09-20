@@ -18,25 +18,26 @@
 include 'tests'
 
 include 'core:nodejsActionBase'
-include 'core:nodejs6Action'
-include 'core:nodejs8Action'
-include 'core:nodejs10Action'
-include 'core:nodejs12Action'
-include 'tests:dat:docker:nodejs6docker'
-include 'tests:dat:docker:nodejs8docker'
-include 'tests:dat:docker:nodejs10docker'
-include 'tests:dat:docker:nodejs12docker'
+include 'core:nodejs18Action'
+include 'core:nodejs20Action'
+include 'tests:dat:docker:nodejs18docker'
+include 'tests:dat:docker:nodejs20docker'
 
 rootProject.name = 'runtime-nodejs'
 
 gradle.ext.openwhisk = [
-        version: '1.0.0-SNAPSHOT'
+        version: '1.0.1-SNAPSHOT'
 ]
 
 gradle.ext.scala = [
-    version: '2.12.7',
+    version: '2.12.10',
+    depVersion  : '2.12',
     compileFlags: ['-feature', '-unchecked', '-deprecation', '-Xfatal-warnings', '-Ywarn-unused-import']
 ]
+
+
+gradle.ext.akka = [version : '2.6.12']
+gradle.ext.akka_http = [version : '10.2.4']
 
 gradle.ext.scalafmt = [
     version: '1.5.0',

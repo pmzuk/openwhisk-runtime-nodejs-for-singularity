@@ -29,6 +29,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
 
   val nodejsContainerImageName: String
   val nodejsTestDockerImageName: String
+  val isTypeScript = false
 
   override def withActionContainer(env: Map[String, String] = Map.empty)(code: ActionContainer => Unit) = {
     withContainer(nodejsContainerImageName, env)(code)
@@ -80,9 +81,25 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
         |       "api_key": process.env['__OW_API_KEY'],
         |       "namespace": process.env['__OW_NAMESPACE'],
         |       "action_name": process.env['__OW_ACTION_NAME'],
+        |       "action_version": process.env['__OW_ACTION_VERSION'],
         |       "activation_id": process.env['__OW_ACTIVATION_ID'],
         |       "deadline": process.env['__OW_DEADLINE']
         |    }
+        |}
+      """.stripMargin.trim)
+  }
+
+  override val testEnvParameters = {
+    // the environment variables are ready at load time to ensure
+    // variables are already available in the runtime
+    TestConfig("""
+        |const envargs = {
+        |    "SOME_VAR": process.env.SOME_VAR,
+        |    "ANOTHER_VAR": process.env.ANOTHER_VAR
+        |}
+        |
+        |function main(args) {
+        |    return envargs
         |}
       """.stripMargin.trim)
   }
@@ -121,7 +138,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
           | 20 GOTO 10
         """.stripMargin
 
-      val (initCode, _) = c.init(initPayload(code))
+      val (initCode, res) = c.init(initPayload(code))
 
       initCode should not be (200)
     }
@@ -160,7 +177,10 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
       initCode should be(200)
 
       val (runCode, runRes) = c.run(runPayload(JsObject()))
-      runCode should not be (200)
+      // actionloop proxy does not return a different error code when there is an error,
+      // because it communicates only through json
+      if (!isTypeScript)
+        runCode should not be (200)
 
       runRes shouldBe defined
       runRes.get.fields.get("error") shouldBe defined
@@ -277,18 +297,21 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
           | }
         """.stripMargin
 
-      c.init(initPayload(code))._1 should be(200)
-
-      val (runCode, result) = c.run(runPayload(JsObject("payload" -> JsString("test"))))
-      runCode should be(200)
-      result should be(Some(JsObject("payload" -> JsString("hello, test!"))))
+      if (isTypeScript)
+        c.init(initPayload(code))._1 should be(502)
+      else {
+        c.init(initPayload(code))._1 should be(200)
+        val (runCode, result) = c.run(runPayload(JsObject("payload" -> JsString("test"))))
+        runCode should be(200)
+        result should be(Some(JsObject("payload" -> JsString("hello, test!"))))
+      }
     }
-
-    checkStreams(out, err, {
-      case (o, e) =>
-        o shouldBe "hello, test!"
-        e shouldBe empty
-    })
+    if (!isTypeScript)
+      checkStreams(out, err, {
+        case (o, e) =>
+          o shouldBe "hello, test!"
+          e shouldBe empty
+      })
   }
 
   it should "support webpacked function" in {
@@ -301,11 +324,40 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
           |global.main = foo
         """.stripMargin
 
-      c.init(initPayload(code))._1 should be(200)
+      if (isTypeScript) {
+        c.init(initPayload(code))._1 should be(502)
+      } else {
+        c.init(initPayload(code))._1 should be(200)
 
-      val (runCode, result) = c.run(JsObject.empty)
+        val (runCode, result) = c.run(JsObject.empty)
+        runCode should be(200)
+        result should be(Some(JsObject("bar" -> JsTrue)))
+      }
+    }
+
+    if (!isTypeScript) {
+      checkStreams(out, err, {
+        case (o, e) =>
+          o shouldBe empty
+          e shouldBe empty
+      })
+    }
+  }
+
+  it should "support exports.main for single files" in {
+    val (out, err) = withNodeJsContainer { c =>
+      val code =
+        """
+          | exports.main = function (params) {
+          |     return params
+          | }
+        """.stripMargin
+
+      c.init(initPayload(code))._1 should be(200)
+      val (runCode, out) = c.run(runPayload(JsObject("payload" -> JsString("Hello exports!"))))
+
       runCode should be(200)
-      result should be(Some(JsObject("bar" -> JsTrue)))
+      out should be(Some(JsObject("payload" -> JsString("Hello exports!"))))
     }
 
     checkStreams(out, err, {
@@ -315,6 +367,28 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
     })
   }
 
+  it should "support module.exports.main for single files" in {
+    val (out, err) = withNodeJsContainer { c =>
+      val code =
+        """
+          | module.exports.main = function (params) {
+          |     return params
+          | }
+        """.stripMargin
+
+      c.init(initPayload(code))._1 should be(200)
+      val (runCode, out) = c.run(runPayload(JsObject("payload" -> JsString("Hello exports!"))))
+
+      runCode should be(200)
+      out should be(Some(JsObject("payload" -> JsString("Hello exports!"))))
+    }
+
+    checkStreams(out, err, {
+      case (o, e) =>
+        o shouldBe empty
+        e shouldBe empty
+    })
+  }
   it should "error when requiring a non-existent package" in {
     // NPM package names cannot start with a dot, and so there is no danger
     // of the package below ever being valid.
@@ -333,12 +407,16 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
 
       val (runCode, out) = c.run(runPayload(JsObject()))
 
-      runCode should not be (200)
+      if (isTypeScript)
+        out.get.fields should contain key ("error")
+      else
+        runCode should not be (200)
+
     }
 
     // Somewhere, the logs should mention an error occurred.
     checkStreams(out, err, {
-      case (o, e) => (o + e) should include("MODULE_NOT_FOUND")
+      case (o, e) => (o + e) should include regex ("Error|error")
     })
   }
 
@@ -349,6 +427,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
         """
           | function main(args) {
           |     require('openwhisk');
+          |     return { "result": true }
           | }
         """.stripMargin
 
@@ -656,7 +735,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
     checkStreams(out, err, {
       case (o, e) =>
         (o + e).toLowerCase should include("error")
-        (o + e).toLowerCase should include("uncompressing")
+        (o + e).toLowerCase should include regex ("syntax|uncompressing")
     })
   }
 
@@ -675,7 +754,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
 
     checkStreams(out, err, {
       case (o, e) =>
-        (o + e).toLowerCase should include("error")
+        (o + e).toLowerCase should include regex ("error|exited")
         (o + e).toLowerCase should include("zipped actions must contain either package.json or index.js at the root.")
     })
   }
@@ -752,7 +831,7 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
   }
 
   it should "use user provided npm packages in a zip file" in {
-    val zipPath = new File("tests/dat/actions/nodejs-test.zip").toPath
+    val zipPath = new File("dat/actions/nodejs-test.zip").toPath
     val code = ResourceHelpers.readAsBase64(zipPath)
     withNodeJsContainer { c =>
       c.init(initPayload(code))._1 should be(200)
@@ -784,6 +863,74 @@ abstract class NodeJsActionContainerTests extends BasicActionRunnerTests with Ws
 
       runRes shouldBe defined
       runRes.get.fields.get("message") shouldBe Some(JsString("success"))
+    }
+  }
+
+  it should "support async and await" in {
+    assume(!isTypeScript)
+    withNodeJsContainer { c =>
+      val code = """
+                   | const util = require('util');
+                   | const fs = require('fs');
+                   |
+                   | const stat = util.promisify(fs.stat);
+                   |
+                   | async function main() {
+                   |   const stats = await stat('.');
+                   |   return stats
+                   | }
+                 """.stripMargin;
+
+      val (initCode, _) = c.init(initPayload(code))
+      initCode should be(200)
+
+      val (runCode, runRes) = c.run(runPayload(JsObject()))
+      runCode should be(200) // action writer returning an error is OK
+
+      runRes shouldBe defined
+      runRes.get.fields.get("uid") shouldBe defined
+    }
+  }
+
+  it should "support errors thrown from async functions" in {
+    assume(!isTypeScript)
+    withNodeJsContainer { c =>
+      val code = """
+                   | async function main() {
+                   |   return a.b.c
+                   | }
+                 """.stripMargin;
+
+      val (initCode, _) = c.init(initPayload(code))
+      initCode should be(200)
+
+      val (runCode, runRes) = c.run(runPayload(JsObject()))
+      runCode should be(200) // action writer returning an error is OK
+
+      runRes shouldBe defined
+      runRes.get.fields.get("error") shouldBe defined
+      runRes.get.fields("error").toString.toLowerCase should include("referenceerror: a is not defined")
+    }
+  }
+
+  it should "support user thrown errors from async functions" in {
+    assume(!isTypeScript)
+    withNodeJsContainer { c =>
+      val code = """
+                   | async function main() {
+                   |   throw new Error('app error')
+                   | }
+                 """.stripMargin;
+
+      val (initCode, _) = c.init(initPayload(code))
+      initCode should be(200)
+
+      val (runCode, runRes) = c.run(runPayload(JsObject()))
+      runCode should be(200) // action writer returning an error is OK
+
+      runRes shouldBe defined
+      runRes.get.fields.get("error") shouldBe defined
+      runRes.get.fields("error").toString.toLowerCase should include("error: app error")
     }
   }
 }
